@@ -5,118 +5,152 @@ import requests
 import telebot
 from flask import Flask, request
 
-# --- [ استخراج المفاتيح - السيطرة الكاملة ] ---
+# --- [ جلب المفاتيح من Vercel ] ---
 TOKEN = os.environ.get("BOT_TOKEN")
 GH_TOKEN = os.environ.get("GH_TOKEN")
 REPO = os.environ.get("REPO_NAME")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8294538151"))
-CHANNEL = os.environ.get("CHANNEL_ID", "@zsewwi")
-DEV_USER = "@F_l1t"
+CHANNEL = "@zsewwi"
 
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 
-# --- [ نظام إدارة البيانات عبر GitHub ] ---
-def github_manage(path, method="GET", content=None, sha=None):
-    url = f"https://api.github.com/repos/{REPO}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GH_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
+# --- [ محرك GitHub للتحكم الشامل ] ---
+def manage_db(action="read", data=None):
+    url = f"https://api.github.com/repos/{REPO}/contents/db.json"
+    headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    
+    r = requests.get(url, headers=headers)
+    sha = r.json().get('sha') if r.status_code == 200 else None
+    current_content = json.loads(base64.b64decode(r.json()['content']).decode('utf-8')) if sha else {
+        "users": {}, "categories": ["📱 أرقام", "🛠️ أدوات مدفوعة", "🎁 أدوات مجانية"],
+        "products": [], "settings": {"ref_price": 0.5}, "states": {}
     }
-    
-    if method == "GET":
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            res = r.json()
-            return json.loads(base64.b64decode(res['content']).decode('utf-8')), res['sha']
-        return {"users": {}, "items": {"nums": [], "paid": [], "free": []}}, None
-    
-    elif method == "PUT":
-        payload = {
-            "message": "Update Store Data",
-            "content": base64.b64encode(json.dumps(content, indent=4).encode('utf-8')).decode('utf-8'),
-            "sha": sha
-        }
-        return requests.put(url, headers=headers, json=payload).status_code
 
-# --- [ الأزرار والواجهات الأسطورية ] ---
-def build_menu(uid):
-    m = telebot.types.InlineKeyboardMarkup(row_width=2)
-    m.add(
-        telebot.types.InlineKeyboardButton("📱 قسم الأرقام الأمريكية", callback_data="sec_nums"),
-        telebot.types.InlineKeyboardButton("💰 الأدوات المدفوعة", callback_data="sec_paid")
-    )
-    m.add(
-        telebot.types.InlineKeyboardButton("🎁 الأدوات المجانية", callback_data="sec_free"),
-        telebot.types.InlineKeyboardButton("👤 حسابي", callback_data="profile")
-    )
-    m.add(
-        telebot.types.InlineKeyboardButton("🔗 رابط الإحالة", callback_data="referral"),
-        telebot.types.InlineKeyboardButton("⚠️ الإبلاغ عن مشكلة", callback_data="report_issue")
-    )
-    if uid == ADMIN_ID:
-        m.add(telebot.types.InlineKeyboardButton("🔱 لوحة تحكم المطور 🔱", callback_data="admin_panel"))
-    return m
+    if action == "read": return current_content
+    
+    if action == "write":
+        new_content = base64.b64encode(json.dumps(data, indent=4).encode('utf-8')).decode('utf-8')
+        requests.put(url, headers=headers, json={"message": "Update DB", "content": new_content, "sha": sha})
 
-# --- [Middleware: التحقق من الاشتراك ] ---
-def check_membership(uid):
+# --- [ التحقق من الاشتراك الإجباري ] ---
+def check_sub(uid):
     try:
         s = bot.get_chat_member(CHANNEL, uid).status
         return s in ['member', 'administrator', 'creator']
     except: return False
 
-# --- [ استقبال التحديثات من تليجرام ] ---
+# --- [ كيبورد المتجر ] ---
+def main_kb(uid):
+    db = manage_db("read")
+    m = telebot.types.InlineKeyboardMarkup(row_width=2)
+    for cat in db['categories']:
+        m.add(telebot.types.InlineKeyboardButton(cat, callback_data=f"view_cat_{cat}"))
+    
+    m.add(telebot.types.InlineKeyboardButton("👤 حسابي", callback_data="my_acc"),
+          telebot.types.InlineKeyboardButton("🔗 دعوة", callback_data="ref"))
+    
+    if uid == ADMIN_ID:
+        m.add(telebot.types.InlineKeyboardButton("⚙️ لوحة التحكم الشاملة", callback_data="admin_panel"))
+    return m
+
+# --- [ معالجة الويب هوك ] ---
 @app.route('/api', methods=['POST'])
 def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return ''
-    return '403'
+    bot.process_new_updates([telebot.types.Update.de_json(request.get_json())])
+    return '', 200
 
-# --- [ معالجة الأوامر الرئيسية ] ---
-@bot.message_handler(commands=['start'])
-def welcome(m):
+# --- [ استقبال الرسائل والتحكم بالحالات ] ---
+@bot.message_handler(func=lambda m: True, content_types=['text', 'document'])
+def handle_all_messages(m):
     uid = m.from_user.id
-    if not check_membership(uid):
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(telebot.types.InlineKeyboardButton("✅ اضغط هنا للاشتراك أولاً", url=f"https://t.me/{CHANNEL.replace('@','')}"))
-        return bot.send_message(m.chat.id, f"⚠️ عذراً عزيزي، يجب أن تكون عضواً في قناتنا لتتمكن من استخدام المتجر واستعراض الأدوات:\n\n{CHANNEL}", reply_markup=markup)
+    db = manage_db("read")
+    state = db.get("states", {}).get(str(uid))
 
-    bot.send_message(m.chat.id, "👋 أهلاً بك في متجر القيصر المطور.\nتمتع بتجربة شراء وتحميل فريدة من نوعها.", reply_markup=build_menu(uid))
+    if m.text == "/start":
+        if not check_sub(uid):
+            return bot.send_message(m.chat.id, f"🚫 **يجب الاشتراك أولاً:** {CHANNEL}")
+        
+        # نظام الإحالة (إذا دخل من رابط شخص آخر)
+        args = m.text.split()
+        if len(args) > 1 and str(uid) not in db['users']:
+            ref_id = args[1]
+            if ref_id != str(uid):
+                db['users'][ref_id]['balance'] = db['users'].get(ref_id, {}).get('balance', 0) + db['settings']['ref_price']
+        
+        if str(uid) not in db['users']:
+            db['users'][str(uid)] = {"balance": 0, "invited": 0}
+            manage_db("write", db)
+            
+        return bot.send_message(m.chat.id, "🥷 **مرحباً بك في متجر القيصر**\nتصفح الأقسام أدناه:", reply_markup=main_kb(uid), parse_mode="Markdown")
 
-# --- [ معالجة أزرار الاستجابة (Callback) ] ---
+    # --- [ منطق إضافة قسم جديد ] ---
+    if state == "add_category_name" and uid == ADMIN_ID:
+        db['categories'].append(m.text)
+        db['states'][str(uid)] = None
+        manage_db("write", db)
+        return bot.send_message(m.chat.id, f"✅ تم إضافة قسم: **{m.text}** بنجاح!")
+
+    # --- [ منطق إضافة منتج (أداة أو رقم) ] ---
+    if isinstance(state, dict) and state.get('action') == "adding_product" and uid == ADMIN_ID:
+        step = state.get('step')
+        
+        if step == "name":
+            state['name'] = m.text
+            state['step'] = "price"
+            db['states'][str(uid)] = state
+            manage_db("write", db)
+            return bot.send_message(m.chat.id, "💰 أرسل السعر (مثلاً: 0.75 أو 50 للنجوم):")
+            
+        if step == "price":
+            state['price'] = m.text
+            state['step'] = "file"
+            db['states'][str(uid)] = state
+            manage_db("write", db)
+            return bot.send_message(m.chat.id, "📎 أرسل الآن ملف الأداة أو 'رقم' (نص):")
+
+        if step == "file":
+            content = m.text if m.text else m.document.file_id
+            db['products'].append({
+                "cat": state['cat'], "name": state['name'], 
+                "price": state['price'], "content": content
+            })
+            db['states'][str(uid)] = None
+            manage_db("write", db)
+            return bot.send_message(m.chat.id, "✅ **تم إضافة المنتج للمتجر بنجاح!**")
+
+# --- [ معالجة الأزرار ] ---
 @bot.callback_query_handler(func=lambda c: True)
-def process_callbacks(c):
-    uid = c.from_user.id
-    cid = c.message.chat.id
-    mid = c.message.message_id
+def calls(c):
+    uid, cid = c.from_user.id, c.message.chat.id
+    db = manage_db("read")
 
-    # -- الأقسام العامة --
-    if c.data == "sec_nums":
-        bot.edit_message_text("📱 **قسم الأرقام الأمريكية الحصرية:**\n\nجميع الأرقام تعمل 100% ويتم تسليمها فورياً بـ 50 نجمة تليجرام.", cid, mid, parse_mode="Markdown")
-    
-    elif c.data == "report_issue":
-        bot.edit_message_text(f"⚠️ واجهت مشكلة؟ تواصل مع المطور مباشرة:\n\nالاسم: إبراهيم\nالمعرف: {DEV_USER}", cid, mid)
+    if c.data == "admin_panel" and uid == ADMIN_ID:
+        m = telebot.types.InlineKeyboardMarkup(row_width=2)
+        m.add(telebot.types.InlineKeyboardButton("➕ إضافة قسم", callback_data="add_cat"),
+              telebot.types.InlineKeyboardButton("📦 إضافة منتج", callback_data="add_prod"),
+              telebot.types.InlineKeyboardButton("⚙️ سعر الإحالة", callback_data="set_ref"),
+              telebot.types.InlineKeyboardButton("📢 إذاعة", callback_data="bc"))
+        bot.edit_message_text("🛠️ **لوحة التحكم الشاملة**", cid, c.message.message_id, reply_markup=m, parse_mode="Markdown")
 
-    # -- لوحة التحكم الملكية للمطور فقط --
-    elif c.data == "admin_panel" and uid == ADMIN_ID:
-        adm = telebot.types.InlineKeyboardMarkup(row_width=2)
-        adm.add(
-            telebot.types.InlineKeyboardButton("➕ إضافة أداة", callback_data="adm_add"),
-            telebot.types.InlineKeyboardButton("❌ حذف أداة من GitHub", callback_data="adm_del"),
-            telebot.types.InlineKeyboardButton("📢 إذاعة شاملة", callback_data="adm_broadcast"),
-            telebot.types.InlineKeyboardButton("📊 إحصائيات", callback_data="adm_stats"),
-            telebot.types.InlineKeyboardButton("🔙 العودة", callback_data="main_menu")
-        )
-        bot.edit_message_text("🔱 مرحباً بك يا سيدي المطور في لوحة التحكم الشاملة.\nماذا تريد أن تفعل الآن؟", cid, mid, reply_markup=adm)
+    if c.data == "add_cat" and uid == ADMIN_ID:
+        db['states'][str(uid)] = "add_category_name"
+        manage_db("write", db)
+        bot.send_message(cid, "📝 أرسل اسم القسم الجديد (مثلاً: حسابات فيسبوك):")
 
-    elif c.data == "main_menu":
-        bot.edit_message_text("🔱 متجر القيصر المطور 🔱", cid, mid, reply_markup=build_menu(uid))
+    if c.data == "add_prod" and uid == ADMIN_ID:
+        m = telebot.types.InlineKeyboardMarkup()
+        for cat in db['categories']:
+            m.add(telebot.types.InlineKeyboardButton(cat, callback_data=f"sel_cat_{cat}"))
+        bot.edit_message_text("📂 اختر القسم الذي تريد الإضافة إليه:", cid, c.message.message_id, reply_markup=m)
 
-    bot.answer_callback_query(c.id)
+    if c.data.startswith("sel_cat_") and uid == ADMIN_ID:
+        cat = c.data.replace("sel_cat_", "")
+        db['states'][str(uid)] = {"action": "adding_product", "step": "name", "cat": cat}
+        manage_db("write", db)
+        bot.send_message(cid, f"🏷️ أرسل اسم المنتج لقسم **{cat}**:")
 
+# --- [ تشغيل Vercel ] ---
 def handler(request):
     return app(request)
 
