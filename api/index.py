@@ -2,14 +2,14 @@ import os
 import telebot
 from flask import Flask, request
 
-# الإعدادات
+# جلب التوكن من الإعدادات
 API_TOKEN = os.environ.get("BOT_TOKEN")
-# استخدام Flask بدلاً من FastAPI لأنه أكثر استقراراً مع توجيهات Vercel البسيطة
-app = Flask(__name__)
 bot = telebot.TeleBot(API_TOKEN, threaded=False)
+app = Flask(__name__)
 
+# المسار الرئيسي لاستقبال التحديثات
 @app.route('/', methods=['POST'])
-def webhook():
+def receive_update():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
@@ -20,14 +20,9 @@ def webhook():
 
 @bot.message_handler(commands=['start'])
 def start(m):
-    bot.reply_to(m, "🔱 تم كسر الصمت! متجر القيصر يعمل الآن 100%")
+    bot.reply_to(m, "🔱 تم الاتصال بنجاح! متجر القيصر جاهز للعمل.")
 
-@bot.callback_query_handler(func=lambda c: True)
-def calls(c):
-    # منطق الأزرار هنا
-    pass
-
-# هذا السطر ضروري لـ Vercel
+# هذا السطر هو مفتاح الحل لفيرسل
 def handler(request):
     return app(request)
 
