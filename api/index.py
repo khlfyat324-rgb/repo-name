@@ -4,63 +4,44 @@ import telebot
 from fastapi import FastAPI, Request
 from github import Github
 
-# جلب الأسرار بطريقة صحيحة وآمنة
-API_TOKEN = os.environ.get("BOT_TOKEN")
+# جلب الإعدادات من Vercel Environment Variables
+API_TOKEN = "8788224553:AAHsmR3J0AmDCAvjycduCUNDZF0C5pV3468"
+ADMIN_ID = 8294538151
+# تأكد من إضافة GH_TOKEN و REPO_NAME في إعدادات Vercel
 GH_TOKEN = os.environ.get("GH_TOKEN")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "8294538151"))
-REPO_NAME = os.environ.get("REPO_NAME")
-CHANNEL_ID = "@zsewwi"
+REPO_NAME = os.environ.get("REPO_NAME") 
 
-bot = telebot.TeleBot(API_TOKEN)
+bot = telebot.TeleBot(API_TOKEN, threaded=False)
 app = FastAPI()
-gh = Github(GH_TOKEN)
 
-def is_subscribed(user_id):
-    try:
-        status = bot.get_chat_member(CHANNEL_ID, user_id).status
-        return status in ['member', 'administrator', 'creator']
-    except:
-        return False
+# مسار استقبال التحديثات من تلجرام
+@app.post("/api")
+async def handle_webhook(request: Request):
+    update = telebot.types.Update.de_json(await request.json())
+    bot.process_new_updates([update])
+    return {"status": "ok"}
 
-def get_db():
-    repo = gh.get_repo(REPO_NAME)
-    contents = repo.get_contents("db.json")
-    return json.loads(contents.decoded_content.decode())
-
-def update_db(data):
-    repo = gh.get_repo(REPO_NAME)
-    contents = repo.get_contents("db.json")
-    repo.update_file(contents.path, "Update DB", json.dumps(data, indent=4), contents.sha)
-
-# تم تغيير المسار هنا لتفادي مشكلة الروابط المكسورة
-@app.post("/webhook")
-async def process_update(request: Request):
-    try:
-        json_str = await request.body()
-        update = telebot.types.Update.de_json(json_str.decode('utf-8'))
-        bot.process_new_updates([update])
-        return {"status": "ok"}
-    except Exception as e:
-        print(f"Error: {e}")
-        return {"status": "error"}
+@app.get("/api")
+async def check():
+    return {"message": "System Online"}
 
 @bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.from_user.id
-    if not is_subscribed(user_id):
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(telebot.types.InlineKeyboardButton("اضغط هنا للاشتراك", url="https://t.me/zsewwi"))
-        return bot.send_message(message.chat.id, "❌ يجب عليك الاشتراك في القناة أولاً لاستخدام البوت!", reply_markup=markup)
+def send_welcome(m):
+    # نظام الاشتراك الإجباري
+    try:
+        status = bot.get_chat_member("@zsewwi", m.from_user.id).status
+        if status not in ['member', 'administrator', 'creator']:
+            return bot.reply_to(m, "❌ اشترك في القناة أولاً: @zsewwi")
+    except: pass
 
-    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
-    btn1 = telebot.types.InlineKeyboardButton("🎁 الأدوات المجانية", callback_data="free")
-    btn2 = telebot.types.InlineKeyboardButton("💰 الأدوات المدفوعة", callback_data="paid")
-    markup.add(btn1, btn2)
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(telebot.types.InlineKeyboardButton("📱 متجر الأرقام", callback_data="nums"))
+    markup.add(telebot.types.InlineKeyboardButton("🛠️ الأدوات", callback_data="tools"))
     
-    if user_id == ADMIN_ID:
-        markup.add(telebot.types.InlineKeyboardButton("⚙️ لوحة التحكم", callback_data="admin_panel"))
+    if m.from_user.id == ADMIN_ID:
+        markup.add(telebot.types.InlineKeyboardButton("⚙️ لوحة التحكم", callback_data="admin"))
+        
+    bot.send_message(m.chat.id, "🔱 مرحباً بك في متجر القيصر المتكامل", reply_markup=markup)
 
-    bot.send_message(message.chat.id, "👋 أهلاً بك في متجر ستار للأدوات!", reply_markup=markup)
-
-# ... (باقي دوال لوحة التحكم كما هي)
+# أضف هنا باقي معالجات الأزرار (callback_query_handler)
 
