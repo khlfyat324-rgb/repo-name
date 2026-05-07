@@ -1,6 +1,3 @@
 pyTelegramBotAPI
-fastapi
-uvicorn
-PyGithub
-python-multipart
-
+requests
+flask
