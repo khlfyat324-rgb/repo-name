@@ -1,47 +1,33 @@
 import os
-import json
 import telebot
-from fastapi import FastAPI, Request
-from github import Github
+from flask import Flask, request
 
-# جلب الإعدادات من Vercel Environment Variables
-API_TOKEN = "8788224553:AAHsmR3J0AmDCAvjycduCUNDZF0C5pV3468"
-ADMIN_ID = 8294538151
-# تأكد من إضافة GH_TOKEN و REPO_NAME في إعدادات Vercel
-GH_TOKEN = os.environ.get("GH_TOKEN")
-REPO_NAME = os.environ.get("REPO_NAME") 
-
+# الإعدادات
+API_TOKEN = os.environ.get("BOT_TOKEN")
+# استخدام Flask بدلاً من FastAPI لأنه أكثر استقراراً مع توجيهات Vercel البسيطة
+app = Flask(__name__)
 bot = telebot.TeleBot(API_TOKEN, threaded=False)
-app = FastAPI()
 
-# مسار استقبال التحديثات من تلجرام
-@app.post("/api")
-async def handle_webhook(request: Request):
-    update = telebot.types.Update.de_json(await request.json())
-    bot.process_new_updates([update])
-    return {"status": "ok"}
-
-@app.get("/api")
-async def check():
-    return {"message": "System Online"}
+@app.route('/', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    else:
+        return '403'
 
 @bot.message_handler(commands=['start'])
-def send_welcome(m):
-    # نظام الاشتراك الإجباري
-    try:
-        status = bot.get_chat_member("@zsewwi", m.from_user.id).status
-        if status not in ['member', 'administrator', 'creator']:
-            return bot.reply_to(m, "❌ اشترك في القناة أولاً: @zsewwi")
-    except: pass
+def start(m):
+    bot.reply_to(m, "🔱 تم كسر الصمت! متجر القيصر يعمل الآن 100%")
 
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("📱 متجر الأرقام", callback_data="nums"))
-    markup.add(telebot.types.InlineKeyboardButton("🛠️ الأدوات", callback_data="tools"))
-    
-    if m.from_user.id == ADMIN_ID:
-        markup.add(telebot.types.InlineKeyboardButton("⚙️ لوحة التحكم", callback_data="admin"))
-        
-    bot.send_message(m.chat.id, "🔱 مرحباً بك في متجر القيصر المتكامل", reply_markup=markup)
+@bot.callback_query_handler(func=lambda c: True)
+def calls(c):
+    # منطق الأزرار هنا
+    pass
 
-# أضف هنا باقي معالجات الأزرار (callback_query_handler)
+# هذا السطر ضروري لـ Vercel
+def handler(request):
+    return app(request)
 
